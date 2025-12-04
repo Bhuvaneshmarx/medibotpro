@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>MediBot Pro – Web</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #e3f2fd;
+            display: flex;
+            height: 100vh;
+            justify-content: center;
+            align-items: center;
+        }
+        .chat-container {
+            background: #f5faff;
+            width: 100%;
+            max-width: 500px;
+            height: 95vh;
+            border-radius: 12px;
+            box-shadow: 0 0 12px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .header {
+            background: #1976d2;
+            color: white;
+            padding: 10px 12px;
+            font-weight: bold;
+        }
+        .top-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+        }
+        .header-sub {
+            font-size: 11px;
+            margin-top: 4px;
+            opacity: 0.9;
+        }
+        .right-tools {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        select {
+            border-radius: 6px;
+            border: none;
+            padding: 3px 6px;
+            font-size: 11px;
+        }
+        .tool-btn {
+            border: none;
+            border-radius: 6px;
+            padding: 4px 8px;
+            font-size: 11px;
+            background: #1565c0;
+            color: #fff;
+            cursor: pointer;
+        }
+        .tool-btn:hover {
+            background: #0d47a1;
+        }
+        .messages {
+            flex: 1;
+            padding: 10px;
+            overflow-y: auto;
+            background: #e3f2fd;
+        }
+        .msg {
+            margin: 6px 0;
+            max-width: 80%;
+            padding: 8px 10px;
+            border-radius: 10px;
+            font-size: 14px;
+            position: relative;
+        }
+        .msg .time {
+            font-size: 10px;
+            opacity: 0.7;
+            margin-top: 2px;
+            text-align: right;
+        }
+        .me {
+            background: #1e88e5;
+            color: white;
+            margin-left: auto;
+            border-bottom-right-radius: 2px;
+        }
+        .bot {
+            background: white;
+            color: #0d47a1;
+            margin-right: auto;
+            border-bottom-left-radius: 2px;
+        }
+        .offline {
+            background: #fff8e1;
+            color: #8d6e63;
+            border: 1px solid #ffe082;
+            margin-right: auto;
+        }
+        .input-area {
+            display: flex;
+            padding: 8px;
+            gap: 6px;
+            background: #e3f2fd;
+        }
+        .input-area input {
+            flex: 1;
+            padding: 8px;
+            border-radius: 8px;
+            border: 1px solid #90caf9;
+            font-size: 14px;
+        }
+        .send-btn {
+            border: none;
+            border-radius: 8px;
+            padding: 0 14px;
+            font-size: 18px;
+            background: #1976d2;
+            color: white;
+            cursor: pointer;
+        }
+        .mic-btn {
+            border: none;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            font-size: 18px;
+            background: #42a5f5;
+            color: white;
+            cursor: pointer;
+        }
+        .mic-btn.disabled {
+            background: #b0bec5;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+<div class="chat-container">
+    <div class="header">
+        <div class="top-bar">
+            <div>MediBot Pro – AI Health Assistant</div>
+            <div class="right-tools">
+                <label for="lang" style="font-size:11px;">Lang:</label>
+                <select id="lang">
+                    <option>English</option>
+                    <option>Hindi</option>
+                    <option>Tamil</option>
+                    <option>Telugu</option>
+                </select>
+                <button class="tool-btn" onclick="openHospitalFinder()">🏥 Hospitals</button>
+            </div>
+        </div>
+        <div class="header-sub">
+            General info only – not a real doctor. For emergencies, go to hospital or call local emergency number.
+        </div>
+    </div>
+
+    <div id="messages" class="messages">
+        <!-- messages injected by JS (so we can restore history) -->
+    </div>
+
+    <div class="input-area">
+        <input id="text" placeholder="Type your message..." />
+        <button class="mic-btn" id="micBtn" title="Speak" onclick="toggleVoice()">🎤</button>
+        <button class="send-btn" onclick="sendMessage()">➤</button>
+    </div>
+</div>
+
+<script>
+let chatHistory = [];
+let recognition = null;
+let recognizing = false;
+
+// ---------- CHAT HISTORY LOAD ----------
+window.addEventListener('load', () => {
+    const stored = localStorage.getItem('medibot_history');
+    if (stored) {
+        try {
+            chatHistory = JSON.parse(stored);
+            chatHistory.forEach(m =>
+                addMessage(m.text, m.who, m.isHtml, true, m.time)
+            );
+        } catch (e) {
+            console.error("Error reading history:", e);
+            chatHistory = [];
+        }
+    }
+
+    if (chatHistory.length === 0) {
+        addMessage(
+            "Hello! I’m MediBot Pro (web). Tell me your symptoms or health question. " +
+            "You can also tap 🏥 Hospitals to open nearby hospitals in Google Maps.",
+            'bot',
+            false
+        );
+    }
+
+    setupSpeechRecognition();
+});
+
+// ---------- MESSAGE HELPERS ----------
+function currentTimeString() {
+    const d = new Date();
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function saveHistory() {
+    localStorage.setItem('medibot_history', JSON.stringify(chatHistory));
+}
+
+function addMessage(text, who, isHtml, skipSave, timeOverride) {
+    const messagesDiv = document.getElementById('messages');
+    const div = document.createElement('div');
+    div.classList.add('msg');
+
+    if (who === 'me') div.classList.add('me');
+    else if (who === 'bot') div.classList.add('bot');
+    else if (who === 'offline') div.classList.add('offline');
+
+    if (isHtml) {
+        div.innerHTML = text.replace(/\n/g, '<br>');
+    } else {
+        div.textContent = text;
+    }
+
+    const timeDiv = document.createElement('div');
+    timeDiv.classList.add('time');
+    const t = timeOverride || currentTimeString();
+    timeDiv.textContent = t;
+    div.appendChild(timeDiv);
+
+    messagesDiv.appendChild(div);
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+
+    if (!skipSave) {
+        chatHistory.push({ text, who, isHtml, time: t });
+        saveHistory();
+    }
+    return div;
+}
+
+// ---------- SEND MESSAGE ----------
+async function sendMessage() {
+    const input = document.getElementById('text');
+    const text = input.value.trim();
+    if (!text) return;
+
+    const lang = document.getElementById('lang').value;
+    const messagesDiv = document.getElementById('messages');
+
+    addMessage(text, 'me', false);
+    input.value = '';
+
+    const thinkingEl = addMessage("Thinking...", 'bot', false, true);
+
+    try {
+        const res = await fetch('/api/chat', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({message: text, language: lang})
+        });
+        const data = await res.json();
+
+        messagesDiv.removeChild(thinkingEl);
+
+        if (data.offline && data.offline.trim() !== "") {
+            addMessage(data.offline, 'offline', true);
+        }
+
+        addMessage(data.reply, 'bot', true);
+    } catch (e) {
+        messagesDiv.removeChild(thinkingEl);
+        addMessage("Error talking to server: " + e, 'bot', false);
+    }
+
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+
+document.getElementById('text').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        sendMessage();
+    }
+});
+
+// ---------- HOSPITAL FINDER ----------
+function openHospitalFinder() {
+    const city = prompt("Enter your city or pincode (or leave empty for 'near me'):");
+    let url;
+    if (!city || city.trim() === "") {
+        url = "https://www.google.com/maps/search/hospitals+near+me";
+        addMessage(
+            "Opening hospitals near you in Google Maps (using 'near me'). " +
+            "You can refine inside Maps with your exact location.",
+            'bot',
+            false
+        );
+    } else {
+        url = "https://www.google.com/maps/search/" +
+            encodeURIComponent("hospitals near " + city.trim());
+        addMessage(
+            "Opening hospitals near <b>" + city.trim() + "</b> in Google Maps.",
+            'bot',
+            true
+        );
+    }
+    window.open(url, '_blank');
+}
+
+// ---------- VOICE INPUT (WEB SPEECH API) ----------
+function setupSpeechRecognition() {
+    const micBtn = document.getElementById('micBtn');
+
+    if (!('webkitSpeechRecognition' in window)) {
+        // Not supported (some browsers / HTTP)
+        micBtn.classList.add('disabled');
+        micBtn.title = "Voice not supported in this browser.";
+        return;
+    }
+
+    recognition = new webkitSpeechRecognition();
+    recognition.lang = 'en-IN'; // you can adjust based on selected language later
+    recognition.continuous = false;
+    recognition.interimResults = false;
+
+    recognition.onstart = () => {
+        recognizing = true;
+        micBtn.textContent = "🔴";
+        micBtn.title = "Listening…";
+    };
+
+    recognition.onend = () => {
+        recognizing = false;
+        micBtn.textContent = "🎤";
+        micBtn.title = "Speak";
+    };
+
+    recognition.onerror = (event) => {
+        console.error("Speech error:", event);
+        recognizing = false;
+        micBtn.textContent = "🎤";
+        micBtn.title = "Speak";
+    };
+
+    recognition.onresult = (event) => {
+        if (!event.results || !event.results[0]) return;
+        const spoken = event.results[0][0].transcript;
+        const input = document.getElementById('text');
+        input.value = spoken;
+        sendMessage();
+    };
+}
+
+function toggleVoice() {
+    if (!recognition) return;
+    if (recognizing) {
+        recognition.stop();
+    } else {
+        try {
+            recognition.start();
+        } catch (e) {
+            console.error("Start recognition error:", e);
+        }
+    }
+}
+</script>
+</body>
+</html>
